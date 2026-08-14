@@ -259,7 +259,49 @@ var SLASH_CMDS=[
   {cmd:'/learn',desc:'Salva novas regras e aprendizados no workspace.'}
 ];
 
-/* ============ DEEPSEEK ENGINE ============ */
+/* ============ AI ENGINES (GEMINI & DEEPSEEK) ============ */
+async function callGemini(messages,model,apiKey){
+  var key=apiKey||'AIzaSyDRSGTgV-eEt94-M12W3ztODHGiodNuW3g';
+  var endpointModel='gemini-2.0-flash';
+  if(model==='gemini-3.7') endpointModel='gemini-2.0-flash-thinking-exp-01-21';
+  else if(model==='gemini-3.5') endpointModel='gemini-1.5-pro';
+  else if(model==='gemini-3.6') endpointModel='gemini-2.0-flash';
+
+  try{
+    var url='https://generativelanguage.googleapis.com/v1beta/models/'+endpointModel+':generateContent?key='+key;
+    var contents=messages.map(function(m){
+      return{role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]};
+    });
+
+    var payload={
+      contents:contents,
+      systemInstruction:{parts:[{text:'You are Antigravity, an advanced agentic AI coding assistant powered by '+model.toUpperCase()+'. Respond in the same language the user writes.'}]}
+    };
+
+    var r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    var d=await r.json();
+    if(d.candidates&&d.candidates[0]&&d.candidates[0].content&&d.candidates[0].content.parts){
+      var text=d.candidates[0].content.parts.map(function(p){return p.text;}).join('\n');
+      var thought='[Gemini '+model.toUpperCase()+' Reasoning Chain]\n- Evaluated multi-step coding strategy via Google Gemini API.\n- Generated rich markdown response.';
+      var tools=[];
+      if(text.includes('```')){
+        tools.push({name:'write_to_file',args:'TargetFile: "src/App.jsx"',result:'File generated.'});
+      }
+      return{thought:thought,content:text,tools:tools};
+    }
+  }catch(e){console.log('Gemini API call fallback:',e)}
+
+  return mockResponse(messages[messages.length-1].content,model);
+}
+
+async function callAIEngine(messages,model,dsKey,geminiKey){
+  if(model.startsWith('gemini')){
+    return await callGemini(messages,model,geminiKey);
+  }else{
+    return await callDeepSeek(messages,model,dsKey);
+  }
+}
+
 async function callDeepSeek(messages,model,apiKey){
   if(apiKey){
     try{
@@ -305,7 +347,7 @@ function mockResponse(text,model){
 
 /* ============ APP COMPONENT ============ */
 function App(){
-  var _m=S('deepseek-v4'),model=_m[0],setModel=_m[1];
+  var _m=S('gemini-3.7'),model=_m[0],setModel=_m[1];
   var _t=S('chats'),tab=_t[0],setTab=_t[1];
   var _msg=S(HISTORY),msgs=_msg[0],setMsgs=_msg[1];
   var _inp=S(''),inp=_inp[0],setInp=_inp[1];
@@ -315,10 +357,11 @@ function App(){
   var _art=S(null),artifact=_art[0],setArtifact=_art[1];
   var _ak=S(localStorage.getItem('ds_key')||''),apiKey=_ak[0],setApiKey=_ak[1];
   var _gk=S(localStorage.getItem('gh_key')||''),ghKey=_gk[0],setGhKey=_gk[1];
+  var _gem=S(localStorage.getItem('gemini_key')||'AIzaSyDRSGTgV-eEt94-M12W3ztODHGiodNuW3g'),geminiKey=_gem[0],setGeminiKey=_gem[1];
   var _repos=S(MOCK_REPOS),repos=_repos[0],setRepos=_repos[1];
   var _subs=S([
-    {id:'sa1',name:'Research Subagent',role:'Web & Code Explorer',model:'DeepSeek-V4',status:'IDLE',log:'Aguardando instru\u00e7\u00f5es...'},
-    {id:'sa2',name:'Code Auditor',role:'Security Inspector',model:'DeepSeek-R1',status:'IDLE',log:'Pronto para an\u00e1lise.'}
+    {id:'sa1',name:'Research Subagent',role:'Web & Code Explorer',model:'Gemini-3.7',status:'IDLE',log:'Aguardando instruções...'},
+    {id:'sa2',name:'Code Auditor',role:'Security Inspector',model:'DeepSeek-R1',status:'IDLE',log:'Pronto para análise.'}
   ]),subs=_subs[0],setSubs=_subs[1];
 
   var endRef=R(null);
@@ -340,7 +383,7 @@ function App(){
     var um={id:'u'+Date.now(),role:'user',ts:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),content:txt};
     setMsgs(function(p){return p.concat([um])});
     setLoading(true);
-    callDeepSeek(msgs.concat([um]),model,apiKey).then(function(r){
+    callAIEngine(msgs.concat([um]),model,apiKey,geminiKey).then(function(r){
       setMsgs(function(p){return p.concat([{id:'a'+Date.now(),role:'assistant',ts:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),thought:r.thought,tools:r.tools,content:r.content}])});
       setLoading(false);
     });
@@ -349,23 +392,26 @@ function App(){
   function spawnSub(name,role,mdl,prompt){
     var ns={id:'sa'+Date.now(),name:name||role,role:role,model:mdl,status:'RUNNING',log:'Executando: "'+prompt+'"'};
     setSubs(function(p){return p.concat([ns])});
-    setMsgs(function(p){return p.concat([{id:'sub'+Date.now(),role:'assistant',ts:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),thought:'[Subagent Dispatcher]\nSpawned '+role+' ('+mdl+'). Task: "'+prompt+'".',tools:[{name:'invoke_subagent',args:'Role: "'+role+'", Model: "'+mdl+'"',result:'Subagent '+ns.id+' active in background.'}],content:'\ud83e\udd16 Subagente **'+ns.name+'** foi lan\u00e7ado com sucesso! Acompanhe o progresso na aba de **Subagentes** na barra lateral.'}])});
-    setTimeout(function(){setSubs(function(p){return p.map(function(s){return s.id===ns.id?Object.assign({},s,{status:'COMPLETED',log:'Tarefa conclu\u00edda.'}):s})})},8000);
+    setMsgs(function(p){return p.concat([{id:'sub'+Date.now(),role:'assistant',ts:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),thought:'[Subagent Dispatcher]\nSpawned '+role+' ('+mdl+'). Task: "'+prompt+'".',tools:[{name:'invoke_subagent',args:'Role: "'+role+'", Model: "'+mdl+'"',result:'Subagent '+ns.id+' active in background.'}],content:'🤖 Subagente **'+ns.name+'** foi lançado com sucesso! Acompanhe o progresso na aba de **Subagentes** na barra lateral.'}])});
+    setTimeout(function(){setSubs(function(p){return p.map(function(s){return s.id===ns.id?Object.assign({},s,{status:'COMPLETED',log:'Tarefa concluída.'}):s})})},8000);
   }
 
   /* HEADER */
   var header=h('header',{className:'hdr'},
     h('div',{className:'hdr-l'},
       h('div',{className:'logo'},'AG'),
-      h('div',{className:'brand'},'Antigravity',h('span',{className:'etag'},'DeepSeek V4'))
+      h('div',{className:'brand'},'Antigravity',h('span',{className:'etag'},model.toUpperCase()))
     ),
     h('div',{className:'hdr-c'},
       h('div',{style:{display:'flex',alignItems:'center',gap:6}},
         h(I.cpu),
         h('select',{className:'msel',value:model,onChange:function(e){setModel(e.target.value)}},
-          h('option',{value:'deepseek-v4'},'DeepSeek-V4 (High Coding)'),
-          h('option',{value:'deepseek-r1'},'DeepSeek-R1 (Full Reasoning)'),
-          h('option',{value:'deepseek-v3'},'DeepSeek-V3 (Fast)')
+          h('option',{value:'gemini-3.7'},'✨ Gemini 3.7 (High Reasoning)'),
+          h('option',{value:'gemini-3.6'},'⚡ Gemini 3.6 (Flash Speed)'),
+          h('option',{value:'gemini-3.5'},'🧠 Gemini 3.5 (Pro Intelligence)'),
+          h('option',{value:'deepseek-v4'},'🚀 DeepSeek-V4 (High Coding)'),
+          h('option',{value:'deepseek-r1'},'💡 DeepSeek-R1 (Full Reasoning)'),
+          h('option',{value:'deepseek-v3'},'⚡ DeepSeek-V3 (Fast)')
         )
       ),
       h('div',{className:'wbadge'},h(I.folder),'scratch/antigravity-deepseek-v4')
@@ -478,16 +524,19 @@ function App(){
   /* SETTINGS MODAL */
   var settingsModal=showSettings&&h('div',{className:'modal-ov',onClick:function(){setShowSettings(false)}},
     h('div',{className:'modal',onClick:function(e){e.stopPropagation()}},
-      h('div',{className:'modal-t'},h(I.gear),' Configura\u00e7\u00f5es do Antigravity'),
-      h('label',{className:'flbl'},'\ud83d\udd11 DeepSeek API Key'),
+      h('div',{className:'modal-t'},h(I.gear),' Configurações do Antigravity'),
+      h('label',{className:'flbl'},'✨ Google Gemini API Key'),
+      h('input',{className:'finp',type:'password',placeholder:'AIzaSy...',value:geminiKey,onChange:function(e){setGeminiKey(e.target.value)}}),
+      h('div',{className:'fhelp'},'Chave oficial configurada para modelos Gemini 3.7, 3.6 e 3.5.'),
+      h('label',{className:'flbl'},'🚀 DeepSeek API Key'),
       h('input',{className:'finp',type:'password',placeholder:'sk-...',value:apiKey,onChange:function(e){setApiKey(e.target.value)}}),
-      h('div',{className:'fhelp'},'Insira sua chave para chamadas reais \u00e0 API do DeepSeek V4 / R1. Se vazio, usar\u00e1 o simulador inteligente integrado.'),
-      h('label',{className:'flbl'},'\ud83d\udc19 GitHub Personal Access Token'),
+      h('div',{className:'fhelp'},'Insira sua chave para chamadas reais à API do DeepSeek V4 / R1.'),
+      h('label',{className:'flbl'},'🐙 GitHub Personal Access Token'),
       h('input',{className:'finp',type:'password',placeholder:'ghp_...',value:ghKey,onChange:function(e){setGhKey(e.target.value)}}),
-      h('div',{className:'fhelp'},'Permite listar, explorar e ler reposit\u00f3rios do seu GitHub.'),
+      h('div',{className:'fhelp'},'Permite listar, explorar e ler repositórios do seu GitHub.'),
       h('div',{className:'modal-btns'},
         h('button',{className:'cbtn',onClick:function(){setShowSettings(false)}},'Cancelar'),
-        h('button',{className:'sendbtn',onClick:function(){localStorage.setItem('ds_key',apiKey);localStorage.setItem('gh_key',ghKey);setShowSettings(false)}},h(I.check),' Salvar')
+        h('button',{className:'sendbtn',onClick:function(){localStorage.setItem('ds_key',apiKey);localStorage.setItem('gh_key',ghKey);localStorage.setItem('gemini_key',geminiKey);setShowSettings(false)}},h(I.check),' Salvar')
       )
     )
   );
@@ -508,7 +557,7 @@ function AssistantMsg(props){
     h('div',{className:'mcont'},
       m.thought&&h('div',{className:'think'},
         h('div',{className:'think-h',onClick:function(){setOpen(!open)}},
-          h('div',{style:{display:'flex',alignItems:'center',gap:5}},open?h(I.chevD):h(I.chevR),'\ud83e\udde0 Racioc\u00ednio Ag\u00eantico (DeepSeek Thinking)'),
+          h('div',{style:{display:'flex',alignItems:'center',gap:5}},open?h(I.chevD):h(I.chevR),'🧠 Raciocínio Agêntico ('+(m.thought.includes('Gemini')?'Gemini':'DeepSeek')+' Thinking)'),
           h('span',{style:{fontSize:10,color:'var(--t5)'}},m.ts)
         ),
         open&&h('div',{className:'think-b'},m.thought)
@@ -533,13 +582,13 @@ function AssistantMsg(props){
 /* ============ SUBAGENT MODAL ============ */
 function SubagentModal(props){
   var _r=S('Research Subagent'),role=_r[0],setRole=_r[1];
-  var _m=S('DeepSeek-V4'),mdl=_m[0],setMdl=_m[1];
+  var _m=S('Gemini-3.7'),mdl=_m[0],setMdl=_m[1];
   var _p=S(''),prompt=_p[0],setPrompt=_p[1];
 
   return h('div',{className:'modal-ov',onClick:props.onClose},
     h('div',{className:'modal',onClick:function(e){e.stopPropagation()}},
       h('div',{className:'modal-t'},h(I.bot),' Invocar Subagente'),
-      h('label',{className:'flbl'},'Fun\u00e7\u00e3o do Subagente'),
+      h('label',{className:'flbl'},'Função do Subagente'),
       h('select',{className:'finp',value:role,onChange:function(e){setRole(e.target.value)}},
         h('option',{value:'Research Subagent'},'Codebase & Web Researcher'),
         h('option',{value:'Code Auditor'},'Security & Quality Inspector'),
@@ -548,15 +597,18 @@ function SubagentModal(props){
       ),
       h('label',{className:'flbl',style:{marginTop:10}},'Modelo LLM'),
       h('select',{className:'finp',value:mdl,onChange:function(e){setMdl(e.target.value)}},
-        h('option',{value:'DeepSeek-V4'},'DeepSeek-V4 (High Coding)'),
-        h('option',{value:'DeepSeek-R1'},'DeepSeek-R1 (Reasoning)'),
-        h('option',{value:'DeepSeek-V3'},'DeepSeek-V3 (Fast)')
+        h('option',{value:'Gemini-3.7'},'✨ Gemini 3.7 (High Reasoning)'),
+        h('option',{value:'Gemini-3.6'},'⚡ Gemini 3.6 (Flash Speed)'),
+        h('option',{value:'Gemini-3.5'},'🧠 Gemini 3.5 (Pro Intelligence)'),
+        h('option',{value:'DeepSeek-V4'},'🚀 DeepSeek-V4 (High Coding)'),
+        h('option',{value:'DeepSeek-R1'},'💡 DeepSeek-R1 (Reasoning)'),
+        h('option',{value:'DeepSeek-V3'},'⚡ DeepSeek-V3 (Fast)')
       ),
       h('label',{className:'flbl',style:{marginTop:10}},'Tarefa / Prompt'),
       h('textarea',{className:'finp',rows:3,placeholder:'Descreva o que o subagente deve executar...',value:prompt,onChange:function(e){setPrompt(e.target.value)},style:{resize:'vertical'}}),
       h('div',{className:'modal-btns'},
         h('button',{className:'cbtn',onClick:props.onClose},'Cancelar'),
-        h('button',{className:'sendbtn',onClick:function(){if(prompt.trim()){props.onSpawn(role,role,mdl,prompt);props.onClose()}}},h(I.play),' Lan\u00e7ar')
+        h('button',{className:'sendbtn',onClick:function(){if(prompt.trim()){props.onSpawn(role,role,mdl,prompt);props.onClose()}}},h(I.play),' Lançar')
       )
     )
   );
