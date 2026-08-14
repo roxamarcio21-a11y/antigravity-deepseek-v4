@@ -340,18 +340,18 @@ function buildRealAppResponse(promptText, model) {
 
     var generatedCode = generateOpenDesignCode(appTitle, promptText, engineTag);
 
-    content = 'Desenvolvi o aplicativo **' + appTitle + '** com identidade visual **Open Design Protocol**!\n\n' +
-      '### ✨ Destaques do Open Design:\n' +
-      '- **Identidade Visual Obsidian Dark**: Paleta HSLTailwind, bordas reluzentes e cartões glassmorphic.\n' +
-      '- **Tipografia e Hierarquia**: Fontes Outfit (Display) e Inter (UI).\n' +
-      '- **Micro-Animações**: Transições suaves de 0.2s e elevação tátil nos botões.\n' +
-      '- **Painel ao Vivo**: O app foi carregado e está sendo executado no painel lateral!\n\n' +
-      '```html\n' + generatedCode + '\n```\n\n' +
-      'Clique no botão **"Ver Artefato ao Vivo"** no topo do código para interagir com o app no painel direito!';
+    content = 'Construí o aplicativo **' + appTitle + '** com a identidade visual **Open Design Protocol**!\n\n' +
+      '### ✨ Destaques do Aplicativo:\n' +
+      '- **Interface Responsiva Dark Glassmorphism**: Paleta HSL Obsidian, bordas reluzentes e profundidade visual.\n' +
+      '- **Hierarquia Tipográfica**: Fontes Outfit (Headers) e Inter (UI).\n' +
+      '- **Micro-Animações & Interatividade**: Transições suaves e lógica JavaScript ativa.\n\n' +
+      'O aplicativo foi compilado e está sendo executado no **Painel de Artefato ao Vivo** no lado direito!';
 
     tools.push({ name: 'apply_open_design', args: 'Theme: "Glassmorphism Dark", MicroAnimations: true', result: 'Identidade visual aplicada.' });
     tools.push({ name: 'write_to_file', args: 'TargetFile: "src/App.html"', result: 'Arquivo do aplicativo gerado.' });
     tools.push({ name: 'open_artifact', args: 'Title: "' + appTitle + '", View: "preview"', result: 'Artefato aberto no painel ao vivo.' });
+
+    return { thought: thought, content: content, tools: tools, artifactCode: generatedCode, artifactTitle: appTitle };
   }
 
   return { thought: thought, content: content, tools: tools };
@@ -404,8 +404,10 @@ function App(){
       setMsgs(function(p){return p.concat([{id:'a'+Date.now(),role:'assistant',ts:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),thought:r.thought,tools:r.tools,content:r.content}])});
       setLoading(false);
 
-      // Auto-open live preview artifact if HTML code was generated
-      if(r.content&&r.content.includes('```html')){
+      // Auto-open live preview artifact directly in right panel
+      if(r.artifactCode){
+        setArtifact({title:r.artifactTitle||'Artefato ao Vivo',code:r.artifactCode,isHtml:true,view:'preview'});
+      }else if(r.content&&r.content.includes('```html')){
         var start=r.content.indexOf('```html')+7;
         var end=r.content.indexOf('```',start);
         if(end>start){
